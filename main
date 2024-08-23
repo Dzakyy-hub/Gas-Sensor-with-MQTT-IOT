@@ -1,0 +1,116 @@
+#define BLYNK_TEMPLATE_ID "TMPL6yPaekdhZ"
+#define BLYNK_TEMPLATE_NAME "Aether Smart Filter"
+#define BLYNK_AUTH_TOKEN "e6UtzEvLoBrww2v0Gl-OYyqs4FHAafdB"
+
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <BlynkSimpleEsp32.h>
+#include <LiquidCrystal_I2C.h>
+
+char auth[] = BLYNK_AUTH_TOKEN;
+
+int lcdColumns = 16;
+int lcdRows = 2;
+LiquidCrystal_I2C lcd(0x27, lcdColumns, lcdRows);
+
+char ssid[] = "Xiaomi 12 Lite";
+char pass[] = "22122008";
+BlynkTimer timer;
+
+const int mq135A0 = 34; // Analog pin for MQ135
+const int mq7A0 = 35; // Analog pin for MQ7
+const int mq136A0 = 33; // Analog pin for MQ136 (SO2) sensor
+
+int no2SensorThres = 40; // Threshold for NO2 in mg/m^3
+int coSensorThres = 10; // Threshold for CO in mg/m^3
+int so2SensorThres = 20; // Threshold for NO2 in mg/m^3
+
+float no2ConcentrationMgM3;
+float coConcentrationMgM3;
+float so2ConcentrationMgM3; // Placeholder for SO2 concentration
+float no2ConversionFactor = (0.389346)/25.3; // Placeholder for NO2 conversion factor
+float coConversionFactor = (9.59233)/7.5; // Placeholder for CO conversion factor
+float so2ConversionFactor = (0.111846)/15.3;
+bool displayToggle = false; // Flag to toggle between sensor displays
+
+// Function to convert ppm to mg/m^3
+float convertPpmToMgM3(float ppm, float molecularWeight) {
+  return ppm * (molecularWeight / 24.45);
+}
+
+// Function to send MQ135 sensor data
+void sendNO2Sensor() {
+  int no2Data = analogRead(mq135A0);
+  float no2ConcentrationPpm = no2Data * no2ConversionFactor;
+  no2ConcentrationMgM3 = convertPpmToMgM3(no2ConcentrationPpm, 46.0055);
+  Blynk.virtualWrite(V0, no2ConcentrationMgM3);
+  if (no2ConcentrationMgM3 > no2SensorThres) {
+    Blynk.logEvent("high_no2_level", "High NO2 Level Detected");
+    Serial.println(no2ConcentrationMgM3);
+  }
+}
+
+// Function to send MQ7 sensor data
+void sendCOSensor() {
+  int coData = analogRead(mq7A0);
+  float coConcentrationPpm = coData * coConversionFactor;
+  coConcentrationMgM3 = convertPpmToMgM3(coConcentrationPpm, 28.01);
+  Blynk.virtualWrite(V1, coConcentrationMgM3);
+  if (coConcentrationMgM3 > coSensorThres) {
+    Blynk.logEvent("high_co_level", "High CO Level Detected");
+    Serial.println(coConcentrationMgM3);
+  }
+}
+
+// Function to send MQ136 (SO2) sensor data
+void sendSO2Sensor() {
+  int so2Data = analogRead(mq136A0);
+  float so2ConcentrationPpm = so2Data * so2ConversionFactor;
+  so2ConcentrationMgM3 = convertPpmToMgM3(so2ConcentrationPpm, 64.06); // Molecular weight of SO2
+  Blynk.virtualWrite(V2, so2ConcentrationMgM3);
+  if (so2ConcentrationMgM3 > 0.1) { // Adjust threshold as needed
+    Blynk.logEvent("high_so2_level", "High SO2 Level Detected");
+    Serial.println(so2ConcentrationMgM3);
+  }
+}
+
+// Function to update LCD display
+void updateLCD() {
+  if (displayToggle) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("NO2: ");
+    lcd.print(no2ConcentrationMgM3);
+    lcd.print(" mg/m3");
+  } else {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("CO: ");
+    lcd.print(coConcentrationMgM3);
+    lcd.print(" mg/m3");
+  }
+  displayToggle = !displayToggle;
+}
+
+void setup() {
+  lcd.init();
+  lcd.backlight();
+  Serial.begin(9600);
+  
+  Blynk.begin(auth, ssid, pass);
+  
+  pinMode(mq135A0, INPUT);
+  pinMode(mq7A0, INPUT);
+  pinMode(mq136A0, INPUT);
+  
+  timer.setInterval(2500L, sendNO2Sensor);
+  timer.setInterval(2500L, sendCOSensor);
+  timer.setInterval(2500L, sendSO2Sensor); // Add this line to read SO2 sensor data
+  timer.setInterval(3000L, updateLCD);
+
+}
+
+void loop() {
+   Blynk.run();
+   timer.run(); // This will run both sensor functions and updateLCD function
+}
